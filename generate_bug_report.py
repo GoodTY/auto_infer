@@ -216,8 +216,7 @@ def process_all_projects(projects_dir, output_dir):
 
     # Save all bugs to a single file
     if all_bugs:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        all_bugs_file = os.path.join(output_dir, f"all_bugs_{timestamp}.json")
+        all_bugs_file = os.path.join(output_dir, "all_bugs.json")
         with open(all_bugs_file, 'w', encoding='utf-8') as f:
             json.dump(all_bugs, f, indent=2, ensure_ascii=False)
         print(f"\nSaved all {len(all_bugs)} bugs to {all_bugs_file}")
