@@ -47,9 +47,12 @@ conver_to_codet5_trans_files.py<br>
 
 generate_bug_report에서 생성된 all_bugs.json을 사용해서<br>
 VJBench-trans 폴더에 들어갈 전처리 데이터 자동 생성<br>
+buggy_lines.json, *_original_method.java 생성<br>
 
 // python3 convert_to_codet5.py <bug-reports/all_bugs.json> <저장할 디렉터리 위치>
 // python3 convert_to_codet5.py bug-reports/all_bugs.json codet5-output
+
+
 
 
 ---
