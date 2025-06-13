@@ -19,6 +19,30 @@ def extract_method_name(procedure):
     # Split by '.' and take the last part
     return method_part.split('.')[-1]
 
+def get_bug_trace(bug):
+    """
+    Extract bug trace information from the bug report
+    """
+    trace = []
+    if 'bug_trace' in bug:
+        for entry in bug['bug_trace']:
+            trace.append({
+                'line': entry.get('line_number', 0),
+                'description': entry.get('description', ''),
+                'level': entry.get('level', '')
+            })
+    return trace
+
+def get_buggy_lines(bug):
+    """
+    Extract start and end lines of the bug from bug trace
+    """
+    if 'bug_trace' in bug and bug['bug_trace']:
+        start_line = bug['bug_trace'][0].get('line_number', 0)
+        end_line = bug['bug_trace'][-1].get('line_number', 0)
+        return start_line, end_line
+    return 0, 0
+
 def get_method_code(file_path, method_name, bug_line):
     """
     Get the actual method code from the source file
@@ -106,6 +130,10 @@ def convert_json_to_json(project_path, output_dir):
             method_name = extract_method_name(bug.get('procedure', ''))
             bug_line = bug.get('line', 0)
             
+            # Get bug trace and buggy lines
+            bug_trace = get_bug_trace(bug)
+            start_line, end_line = get_buggy_lines(bug)
+            
             method_info = get_method_code(
                 os.path.join(project_path, file_path),
                 method_name,
@@ -126,8 +154,11 @@ def convert_json_to_json(project_path, output_dir):
                 'line_number': method_info['bug_line'],
                 'method_start_line': method_info['start_line'],
                 'method_end_line': method_info['end_line'],
+                'bug_start_line': start_line,
+                'bug_end_line': end_line,
                 'severity': bug.get('severity', ''),
-                'method_code': method_info['code']
+                'method_code': method_info['code'],
+                'bug_trace': bug_trace
             }
             processed_bugs.append(processed_bug)
 
