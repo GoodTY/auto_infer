@@ -18,17 +18,17 @@ infer 분석
 infer_analyzer.py<br><br>
 이건 프로젝트 하나 단위로 하는겁니다.<br>
 ex.<br>
-// python3 infer_analyzer.py 프로젝트 저장 위치<br>
+// python3 infer_analyzer.py <프로젝트 저장 위치><br>
 // python3 infer_analyzer.py ./open-source/langchain4j<br>
 
 batch_infer_analyzer.py<br><br>
 이건 프로젝트 뭉탱이 있는거 한꺼번에 infer 돌릴 수 있도록 해놨어요<br>
 ex.<br>
-// python3 batch_infer_analyzer.py 프로젝트 디렉터리 모음 저장 위치<br>
+// python3 batch_infer_analyzer.py <프로젝트 디렉터리 모음 저장 위치><br>
 // python3 batch_infer_analyzer.py ./github-trends/java<br>
 
 ---
-csv 파일 생성
+json 파일 생성
 ---
 
 generate_bug_report.py<br><br>
@@ -36,8 +36,20 @@ generate_bug_report.py<br><br>
 csv 파일로 만들어줘요<br>
 method 코드도 다 긁어 오도록 했으니 대충 확인은 했는데 아마 될껄요?<br>
 ex.<br>
-// python3 generate_bug_report.py  프로젝트 뭉텅이 있는 디렉터리 위치 최종으로 원하는 파일 저장 위치 <br>
+// python3 generate_bug_report.py  <프로젝트 뭉텅이 있는 디렉터리 위치> <최종으로 원하는 파일 저장 위치> <br>
 // python3 generate_bug_report.py ./github-trends/java ./total_report
+
+---
+CodeT5 자동화 시작
+---
+
+conver_to_codet5_trans_files.py<br>
+
+generate_bug_report에서 생성된 all_bugs.json을 사용해서<br>
+VJBench-trans 폴더에 들어갈 전처리 데이터 자동 생성<br>
+
+// python3 convert_to_codet5.py <bug-reports/all_bugs.json> <저장할 디렉터리 위치>
+// python3 convert_to_codet5.py bug-reports/all_bugs.json codet5-output
 
 
 ---
