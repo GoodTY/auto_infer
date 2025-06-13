@@ -28,14 +28,6 @@ ex.<br>
 // python3 batch_infer_analyzer.py ./github-trends/java<br>
 
 ---
-예외 환경 설정
----
-
-upgrade_maven.py <br><br>
-이건 wsl환경에서 maven 부족하면 하는건데 infer_analyzer.py에서 쓰라고하면 쓰면 됩니다.<br>
-제 환경 기준이라 ㅎㅎㅎ<br>
-
----
 csv 파일 생성
 ---
 
@@ -46,3 +38,12 @@ method 코드도 다 긁어 오도록 했으니 대충 확인은 했는데 아�
 ex.<br>
 // python3 generate_bug_report.py  프로젝트 뭉텅이 있는 디렉터리 위치 최종으로 원하는 파일 저장 위치 <br>
 // python3 generate_bug_report.py ./github-trends/java ./total_report
+
+
+---
+예외 환경 설정
+---
+
+upgrade_maven.py <br><br>
+이건 wsl환경에서 maven 부족하면 하는건데 infer_analyzer.py에서 쓰라고하면 쓰면 됩니다.<br>
+제 환경 기준이라 ㅎㅎㅎ<br>
