@@ -21,27 +21,38 @@ def extract_method_name(procedure):
 
 def get_bug_trace(bug):
     """
-    Extract bug trace information from the bug report
+    Extract bug trace from bug report
     """
-    trace = []
-    if 'bug_trace' in bug:
-        for entry in bug['bug_trace']:
-            trace.append({
-                'line': entry.get('line_number', 0),
-                'description': entry.get('description', ''),
-                'level': entry.get('level', '')
-            })
-    return trace
+    try:
+        trace = bug.get('bug_trace', [])
+        if not trace:
+            return []
+            
+        # 버그 트레이스의 모든 라인 번호를 수집
+        trace_lines = [entry.get('line_number', 0) for entry in trace]
+        
+        return [{
+            'line_number': entry.get('line_number', 0),
+            'description': entry.get('description', '')
+        } for entry in trace]
+    except Exception as e:
+        print(f"Error extracting bug trace: {str(e)}")
+        return []
 
-def get_buggy_lines(bug):
+def get_buggy_lines(bug, method_start_line, method_end_line):
     """
-    Extract start and end lines of the bug from bug trace
+    Extract start and end lines of the bug from bug trace, ensuring they are within method bounds
     """
     if 'bug_trace' in bug and bug['bug_trace']:
         start_line = bug['bug_trace'][0].get('line_number', 0)
         end_line = bug['bug_trace'][-1].get('line_number', 0)
+        
+        # Ensure bug lines are within method bounds
+        start_line = max(start_line, method_start_line)
+        end_line = min(end_line, method_end_line)
+        
         return start_line, end_line
-    return 0, 0
+    return method_start_line, method_start_line  # Default to method start if no trace
 
 def get_method_code(file_path, method_name, bug_line):
     """
@@ -98,16 +109,35 @@ def convert_json_to_json(project_path, output_dir):
     Convert Infer JSON bug report to our JSON format
     """
     try:
-        # Construct path to report.json
+        # Try to find report.json first
         report_json = os.path.join(project_path, "infer-out", "report.json")
         
+        # If report.json doesn't exist, look for batch_summary_*.json in infer-results
         if not os.path.exists(report_json):
-            print(f"Warning: No report.json found in {project_path}/infer-out")
-            return False
+            infer_results_dir = os.path.join(os.path.dirname(project_path), "..", "infer-results")
+            if os.path.exists(infer_results_dir):
+                batch_files = [f for f in os.listdir(infer_results_dir) if f.startswith("batch_summary_")]
+                if batch_files:
+                    report_json = os.path.join(infer_results_dir, batch_files[0])
+                    print(f"Using batch summary file: {report_json}")
+                else:
+                    print(f"Warning: No report.json or batch summary found for {project_path}")
+                    return False
+            else:
+                print(f"Warning: No report.json found in {project_path}/infer-out")
+                return False
 
         # Read JSON file
         with open(report_json, 'r', encoding='utf-8') as f:
             bug_reports = json.load(f)
+
+        # If it's a batch summary file, extract the relevant project's bugs
+        if "batch_summary" in report_json:
+            project_name = os.path.basename(project_path)
+            bug_reports = [bug for bug in bug_reports if bug.get('project') == project_path]
+            if not bug_reports:
+                print(f"No bugs found for project {project_name} in batch summary")
+                return False
 
         # Get project name from directory name
         project_name = os.path.basename(project_path)
@@ -130,10 +160,7 @@ def convert_json_to_json(project_path, output_dir):
             method_name = extract_method_name(bug.get('procedure', ''))
             bug_line = bug.get('line', 0)
             
-            # Get bug trace and buggy lines
-            bug_trace = get_bug_trace(bug)
-            start_line, end_line = get_buggy_lines(bug)
-            
+            # Get method code first to determine method bounds
             method_info = get_method_code(
                 os.path.join(project_path, file_path),
                 method_name,
@@ -143,6 +170,23 @@ def convert_json_to_json(project_path, output_dir):
             if isinstance(method_info, str):  # Error occurred
                 print(f"Warning: {method_info} in {file_path}")
                 continue
+
+            # Get bug trace
+            bug_trace = get_bug_trace(bug)
+            
+            # Calculate relative bug lines
+            method_start = method_info['start_line']
+            method_end = method_info['end_line']
+            
+            # bug_start_line은 line_number 그대로 사용
+            bug_start = bug_line
+            
+            # bug_end_line은 method_end_line보다 작거나 같은 bug_trace 라인들 중 가장 큰 값
+            if bug_trace:
+                trace_lines = [entry['line_number'] for entry in bug_trace]
+                bug_end = max(line for line in trace_lines if line <= method_end)
+            else:
+                bug_end = bug_start
                 
             processed_bug = {
                 'project': project_name,
@@ -151,11 +195,11 @@ def convert_json_to_json(project_path, output_dir):
                 'method': method_name,
                 'bug_type': bug.get('bug_type', ''),
                 'description': bug.get('qualifier', ''),
-                'line_number': method_info['bug_line'],
-                'method_start_line': method_info['start_line'],
-                'method_end_line': method_info['end_line'],
-                'bug_start_line': start_line,
-                'bug_end_line': end_line,
+                'line_number': bug_line,
+                'method_start_line': method_start,
+                'method_end_line': method_end,
+                'bug_start_line': bug_start,
+                'bug_end_line': bug_end,
                 'severity': bug.get('severity', ''),
                 'method_code': method_info['code'],
                 'bug_trace': bug_trace
