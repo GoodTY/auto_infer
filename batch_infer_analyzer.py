@@ -101,58 +101,132 @@ class BatchInferAnalyzer:
         try:
             print(f"\n분석 시작: {project_path}")
             
-            # 프로젝트 경로로 이동
-            os.chdir(project_path)
-            
-            # Infer 분석 실행
-            analyzer = InferAnalyzer(project_path)
-            if not analyzer.run_infer():
+            # 절대 경로로 변환
+            abs_project_path = os.path.abspath(project_path)
+            if not os.path.exists(abs_project_path):
                 return {
                     "project": project_path,
                     "status": "error",
-                    "error": "Infer 분석 실패",
-                    "issues": []
+                    "error": f"프로젝트 경로가 존재하지 않습니다: {abs_project_path}"
                 }
             
-            # 결과 분석
-            issues = analyzer.analyze_results()
+            # 현재 작업 디렉토리 저장
+            original_dir = os.getcwd()
             
-            # 각 이슈에 메서드 코드 추가
-            processed_issues = []
-            for issue in issues:
-                try:
-                    processed_issue = {
-                        "bug_type": issue.get("bug_type", "알 수 없음"),
-                        "file": issue.get("file", "알 수 없음"),
-                        "line": issue.get("line", 0),
-                        "procedure": issue.get("procedure", "알 수 없음"),
-                        "description": issue.get("description", "설명 없음")
+            try:
+                # 프로젝트 디렉토리로 이동
+                os.chdir(abs_project_path)
+                print(f"작업 디렉토리: {os.getcwd()}")
+                
+                # 이전 분석 결과 정리
+                if os.path.exists("infer-out"):
+                    import shutil
+                    shutil.rmtree("infer-out", ignore_errors=True)
+                
+                # Maven/Gradle 프로젝트 확인
+                is_maven = os.path.exists("pom.xml")
+                is_gradle = os.path.exists("build.gradle")
+                
+                if not (is_maven or is_gradle):
+                    return {
+                        "project": project_path,
+                        "status": "error",
+                        "error": "Maven 또는 Gradle 프로젝트를 찾을 수 없습니다."
                     }
-                    
-                    # 메서드 코드 추출
-                    if all(k in processed_issue for k in ["file", "procedure", "line"]):
-                        processed_issue["method_code"] = self.get_method_code(
-                            processed_issue["file"],
-                            processed_issue["procedure"],
-                            processed_issue["line"]
-                        )
-                    
-                    processed_issues.append(processed_issue)
-                except Exception as e:
-                    print(f"{self.YELLOW}경고: 이슈 처리 중 오류 발생: {e}{self.NC}")
-                    continue
-            
-            return {
-                "project": project_path,
-                "status": "success",
-                "issues": processed_issues
-            }
+                
+                # Infer 분석 실행
+                if is_maven:
+                    print("Maven 프로젝트 분석 중...")
+                    # Maven 빌드 먼저 시도
+                    if os.system("mvn clean compile -DskipTests") != 0:
+                        return {
+                            "project": project_path,
+                            "status": "error",
+                            "error": "Maven 빌드 실패"
+                        }
+                    # Infer 분석 실행
+                    result = os.system("infer run --keep-going -- mvn clean compile -DskipTests")
+                else:
+                    print("Gradle 프로젝트 분석 중...")
+                    # Gradle 빌드 먼저 시도
+                    if os.system("./gradlew clean compileJava -x test") != 0:
+                        return {
+                            "project": project_path,
+                            "status": "error",
+                            "error": "Gradle 빌드 실패"
+                        }
+                    # Infer 분석 실행
+                    result = os.system("infer run --keep-going -- ./gradlew clean compileJava -x test")
+                
+                if result != 0:
+                    return {
+                        "project": project_path,
+                        "status": "error",
+                        "error": f"Infer 분석 실패 (종료 코드: {result})"
+                    }
+                
+                # 결과 파일 확인
+                infer_out_dir = "infer-out"
+                if not os.path.exists(infer_out_dir):
+                    return {
+                        "project": project_path,
+                        "status": "error",
+                        "error": "infer-out 디렉토리가 생성되지 않았습니다."
+                    }
+                
+                report_file = os.path.join(infer_out_dir, "report.txt")
+                if not os.path.exists(report_file):
+                    return {
+                        "project": project_path,
+                        "status": "error",
+                        "error": "report.txt 파일이 생성되지 않았습니다."
+                    }
+                
+                # 결과 분석
+                analyzer = InferAnalyzer(abs_project_path)
+                issues = analyzer.analyze_results()
+                
+                # 각 이슈에 메서드 코드 추가
+                processed_issues = []
+                for issue in issues:
+                    try:
+                        processed_issue = {
+                            "bug_type": issue.get("bug_type", "알 수 없음"),
+                            "file": issue.get("file", "알 수 없음"),
+                            "line": issue.get("line", 0),
+                            "procedure": issue.get("procedure", "알 수 없음"),
+                            "description": issue.get("description", "설명 없음")
+                        }
+                        
+                        # 메서드 코드 추출
+                        if all(k in processed_issue for k in ["file", "procedure", "line"]):
+                            processed_issue["method_code"] = self.get_method_code(
+                                processed_issue["file"],
+                                processed_issue["procedure"],
+                                processed_issue["line"]
+                            )
+                        
+                        processed_issues.append(processed_issue)
+                    except Exception as e:
+                        print(f"경고: 이슈 처리 중 오류 발생: {e}")
+                        continue
+                
+                return {
+                    "project": project_path,
+                    "status": "success",
+                    "issues": processed_issues,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+            finally:
+                # 원래 디렉토리로 복귀
+                os.chdir(original_dir)
             
         except Exception as e:
             return {
                 "project": project_path,
                 "status": "error",
-                "error": str(e),
+                "error": f"예외 발생: {str(e)}",
                 "issues": []
             }
 
