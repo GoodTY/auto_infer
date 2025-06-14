@@ -300,19 +300,28 @@ export PATH=$M2_HOME/bin:$PATH
             with open(file_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
                 
+            # 메서드 시그니처 파싱
+            method_parts = method_name.split('.')
+            class_name = method_parts[-2] if len(method_parts) > 1 else ""
+            method_sig = method_parts[-1]
+            
             # 메서드 시작과 끝을 찾기 위한 변수
             start_line = max(0, line_number - 1)  # 0-based index
-            end_line = min(len(lines), line_number + 20)  # 최대 20줄까지
+            end_line = min(len(lines), line_number + 50)  # 최대 50줄까지
             method_code = []
             brace_count = 0
             found_method = False
             
             # 메서드 시작 부분 찾기
             for i in range(start_line, -1, -1):
-                if method_name in lines[i]:
-                    start_line = i
-                    found_method = True
-                    break
+                line = lines[i]
+                # 메서드 시그니처와 클래스 이름을 모두 확인
+                if method_sig in line and (not class_name or class_name in line):
+                    # 메서드 선언 라인인지 확인 (public, private, protected 등으로 시작)
+                    if any(access in line for access in ['public', 'private', 'protected', 'static']):
+                        start_line = i
+                        found_method = True
+                        break
                     
             if not found_method:
                 return "메서드를 찾을 수 없습니다."
