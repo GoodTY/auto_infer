@@ -7,6 +7,7 @@ import requests
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
+import random  # 파일 상단에 추가
 
 class GitHubTrendCloner:
     def __init__(self):
@@ -30,9 +31,9 @@ class GitHubTrendCloner:
         
         # 안전 설정
         self.max_repos = 10  # 최대 클론할 저장소 수
-        self.min_stars = 500  # 최소 별표 수 (1000에서 500으로 감소)
-        self.max_size_mb = 100  # 최대 저장소 크기 (MB)
-        self.safe_extensions = {'.java', '.kt', '.gradle', '.xml', '.md', '.txt', '.json', '.yml', '.yaml', '.properties'}
+        self.min_stars = 1000  # 최소 별표 수
+        self.max_stars = 100000  # 최대 별표 수
+
 
     def print_warning(self):
         """보안 경고 메시지를 출력합니다."""
@@ -50,31 +51,25 @@ class GitHubTrendCloner:
 
     def is_safe_repo(self, repo: dict) -> bool:
         """저장소가 안전한지 확인합니다."""
-        # 최소 별표 수 확인
-        if repo['stargazers_count'] < self.min_stars:
-            return False
-            
-        # 저장소 크기 확인 (MB)
-        size_mb = repo['size'] / 1024  # KB to MB
-        if size_mb > self.max_size_mb:
+        # 최소/최대 별표 수 확인
+        if repo['stargazers_count'] < self.min_stars or repo['stargazers_count'] > self.max_stars:
             return False
             
         return True
 
-    def get_trending_repos(self, days: int = 30) -> list:
+    def get_trending_repos(self, days: int = 90) -> list:
         """GitHub Trending Java 저장소 목록을 가져옵니다."""
         try:
             # 검색 쿼리 구성
             query = {
-                "q": f"language:java created:>{datetime.now() - timedelta(days=days):%Y-%m-%d} stars:>={self.min_stars}",
+                "q": f"language:java stars:{self.min_stars}..{self.max_stars}",
                 "sort": "stars",
                 "order": "desc",
                 "per_page": 100
             }
             
             print(f"{self.GREEN}GitHub Trending Java 저장소를 가져오는 중...{self.NC}")
-            print(f"검색 기간: 최근 {days}일")
-            print(f"최소 스타 수: {self.min_stars:,}개")
+            print(f"스타 수 범위: {self.min_stars:,} ~ {self.max_stars:,}개")
             
             response = requests.get(self.api_url, headers=self.headers, params=query)
             response.raise_for_status()
@@ -94,6 +89,9 @@ class GitHubTrendCloner:
             # 안전한 저장소만 필터링
             safe_repos = [repo for repo in repos if self.is_safe_repo(repo)]
             print(f"안전 기준을 통과한 저장소: {len(safe_repos)}개")
+            
+            # 결과를 랜덤하게 섞기
+            random.shuffle(safe_repos)
             
             # 최대 개수 제한
             return safe_repos[:self.max_repos]
