@@ -51,7 +51,7 @@ VJBench-trans 폴더에 들어갈 전처리 데이터 자동 생성<br>
 buggy_lines.json, *_original_method.java 생성<br>
 아래 저장할 디렉터리 위치에 파일이 저장되는데 제가 그냥 옮기기만 하면 CodeT5 돌아갈 수 있게 해놨어요 작동하는 것까지 확인했습니다.<br>
 
-// python3 convert_to_codet5_trans_files.py <bug-reports/all_bugs.json> <저장할 디렉터리 위치>
+// python3 convert_to_codet5_trans_files.py <bug-reports/all_bugs.json> <저장할 디렉터리 위치><br>
 // python3 convert_to_codet5_trans_files.py bug-reports/all_bugs.json codet5-output
 
 
@@ -61,9 +61,9 @@ llm-vul 적용하기
 
 convert_to_codet5_trans_files.py로 만든 데이터들 <br> 
 llm-vul의 VJBench-trans에 복사 붙여넣기 하시고 <br>
-1. /scripts/util.py 쪽에서 범위, 숫자 지정 이것만 해주시면 됩니다.
-2-1. /scripts/CodeT5/prepare_input.py
-2-2. /scripts/fine-tuned_CodeT5/prepare_input.py
+1. /scripts/util.py 쪽에서 범위, 숫자 지정 이것만 해주시면 됩니다.<br>
+2-1. /scripts/CodeT5/prepare_input.py<br>
+2-2. /scripts/fine-tuned_CodeT5/prepare_input.py<br>
 하시고 generate_output하시면 rename, structure, rename+structure 제외한 original은 잘 돌아갑니다. <br>
 
 
