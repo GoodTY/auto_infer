@@ -5,10 +5,12 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import subprocess
 import concurrent.futures
 from infer_analyzer import InferAnalyzer
+import shutil
+import re
 
 class BatchInferAnalyzer:
     def __init__(self, max_workers: int = 2):
@@ -18,41 +20,55 @@ class BatchInferAnalyzer:
         self.NC = '\033[0m'  # No Color
         
         self.max_workers = max_workers
-        self.results_dir = Path("infer-results")
-        self.results_dir.mkdir(exist_ok=True)
+        self.log_dir = os.path.join(os.getcwd(), "logs")
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.results_dir = os.path.join(os.getcwd(), "infer-results")
+        os.makedirs(self.results_dir, exist_ok=True)
         
         # 결과 저장을 위한 파일
-        self.summary_file = self.results_dir / f"batch_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        self.summary_file = os.path.join(self.results_dir, f"batch_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
         
     def find_java_projects(self, directory: str) -> List[str]:
-        """디렉토리 내의 Java 프로젝트를 찾습니다."""
+        """Java 프로젝트 디렉토리 찾기"""
         java_projects = []
-        directory_path = Path(directory)
-        
-        print(f"{self.GREEN}Java 프로젝트 검색 중: {directory}{self.NC}")
-        
-        # 디렉토리가 존재하는지 확인
-        if not directory_path.exists():
-            print(f"{self.RED}Error: 디렉토리가 존재하지 않습니다: {directory}{self.NC}")
-            return []
+        try:
+            # 기준 디렉토리의 절대 경로
+            base_dir = os.path.abspath(directory)
             
-        # 디렉토리 내의 모든 하위 디렉토리 검사
-        for root, dirs, files in os.walk(directory):
-            # Maven 프로젝트 확인
-            if "pom.xml" in files:
-                project_path = str(Path(root))
-                print(f"{self.GREEN}Maven 프로젝트 발견: {project_path}{self.NC}")
-                java_projects.append(project_path)
-                # 하위 디렉토리 검색 중단 (중복 방지)
-                dirs[:] = []
-            # Gradle 프로젝트 확인
-            elif "build.gradle" in files:
-                project_path = str(Path(root))
-                print(f"{self.GREEN}Gradle 프로젝트 발견: {project_path}{self.NC}")
-                java_projects.append(project_path)
-                # 하위 디렉토리 검색 중단 (중복 방지)
-                dirs[:] = []
-        
+            # 이미 처리된 경로를 추적
+            processed_paths = set()
+            
+            for root, dirs, files in os.walk(directory):
+                # Android 프로젝트 제외
+                if "android" in root.lower():
+                    continue
+                    
+                # build.gradle 또는 pom.xml이 있는 디렉토리 찾기
+                if "build.gradle" in files or "pom.xml" in files:
+                    abs_path = os.path.abspath(root)
+                    
+                    # 이미 처리된 경로의 하위 디렉토리인지 확인
+                    if any(abs_path.startswith(p) for p in processed_paths):
+                        continue
+                        
+                    # 최상위 프로젝트 디렉토리 찾기
+                    current_dir = root
+                    while current_dir != base_dir:
+                        parent_dir = os.path.dirname(current_dir)
+                        if os.path.exists(os.path.join(parent_dir, "build.gradle")) or \
+                           os.path.exists(os.path.join(parent_dir, "pom.xml")):
+                            current_dir = parent_dir
+                        else:
+                            break
+                    
+                    abs_path = os.path.abspath(current_dir)
+                    if abs_path not in processed_paths:
+                        java_projects.append(abs_path)
+                        processed_paths.add(abs_path)
+                        print(f"프로젝트 발견: {abs_path}")
+                        
+        except Exception as e:
+            print(f"프로젝트 검색 중 오류 발생: {str(e)}")
         return java_projects
         
     def get_method_code(self, file_path: str, method_name: str, line_number: int) -> str:
@@ -96,139 +112,124 @@ class BatchInferAnalyzer:
         except Exception as e:
             return f"코드 추출 중 오류 발생: {str(e)}"
 
-    def analyze_project(self, project_path: str) -> Dict:
-        """단일 프로젝트를 분석합니다."""
+    def analyze_project(self, project_path: str) -> Dict[str, str]:
+        """프로젝트 분석"""
         try:
-            print(f"\n분석 시작: {project_path}")
+            print(f"\n프로젝트 분석 시작: {project_path}")
             
-            # 절대 경로로 변환
-            abs_project_path = os.path.abspath(project_path)
-            if not os.path.exists(abs_project_path):
+            # Java 버전 감지
+            java_version = self.detect_java_version(project_path)
+            print(f"감지된 Java 버전: {java_version}")
+            
+            # Java 환경 설정
+            env = os.environ.copy()
+            java_home = f"/usr/lib/jvm/java-{java_version}-openjdk-amd64"
+            env["JAVA_HOME"] = java_home
+            env["PATH"] = f"{java_home}/bin:{env['PATH']}"
+            
+            # Gradle 프로젝트 분석
+            if os.path.exists(os.path.join(project_path, "gradlew")):
+                print("Gradle 프로젝트 분석 시작...")
+                gradle_cmd = ["infer", "run", "--", "./gradlew", "clean", "build", "--no-daemon"]
+                process = subprocess.run(
+                    gradle_cmd,
+                    cwd=project_path,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                
+                if process.returncode != 0:
+                    return {
+                        "project": project_path,
+                        "status": "error",
+                        "error": f"Gradle 빌드/분석 실패. 로그: {process.stderr}"
+                    }
+                
+                print("Gradle 프로젝트 분석 완료")
+            
+            # Maven 프로젝트 분석
+            elif os.path.exists(os.path.join(project_path, "pom.xml")):
+                print("Maven 프로젝트 분석 시작...")
+                
+                # Maven 빌드 명령 실행
+                mvn_cmd = ["infer", "run", "--", "mvn", "clean", "compile"]
+                process = subprocess.run(
+                    mvn_cmd,
+                    cwd=project_path,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                
+                if process.returncode != 0:
+                    return {
+                        "project": project_path,
+                        "status": "error",
+                        "error": f"Maven 빌드/분석 실패. 로그: {process.stderr}"
+                    }
+                
+                print("Maven 프로젝트 분석 완료")
+            else:
                 return {
                     "project": project_path,
                     "status": "error",
-                    "error": f"프로젝트 경로가 존재하지 않습니다: {abs_project_path}"
+                    "error": "빌드 파일을 찾을 수 없습니다."
                 }
             
-            # 현재 작업 디렉토리 저장
-            original_dir = os.getcwd()
-            
-            try:
-                # 프로젝트 디렉토리로 이동
-                os.chdir(abs_project_path)
-                print(f"작업 디렉토리: {os.getcwd()}")
-                
-                # 이전 분석 결과 정리
-                if os.path.exists("infer-out"):
-                    import shutil
-                    shutil.rmtree("infer-out", ignore_errors=True)
-                
-                # Maven/Gradle 프로젝트 확인
-                is_maven = os.path.exists("pom.xml")
-                is_gradle = os.path.exists("build.gradle")
-                
-                if not (is_maven or is_gradle):
-                    return {
-                        "project": project_path,
-                        "status": "error",
-                        "error": "Maven 또는 Gradle 프로젝트를 찾을 수 없습니다."
-                    }
-                
-                # Infer 분석 실행
-                if is_maven:
-                    print("Maven 프로젝트 분석 중...")
-                    # Maven 빌드 먼저 시도
-                    if os.system("mvn clean compile -DskipTests") != 0:
-                        return {
-                            "project": project_path,
-                            "status": "error",
-                            "error": "Maven 빌드 실패"
-                        }
-                    # Infer 분석 실행
-                    result = os.system("infer run --keep-going -- mvn clean compile -DskipTests")
-                else:
-                    print("Gradle 프로젝트 분석 중...")
-                    # Gradle 빌드 먼저 시도
-                    if os.system("./gradlew clean compileJava -x test") != 0:
-                        return {
-                            "project": project_path,
-                            "status": "error",
-                            "error": "Gradle 빌드 실패"
-                        }
-                    # Infer 분석 실행
-                    result = os.system("infer run --keep-going -- ./gradlew clean compileJava -x test")
-                
-                if result != 0:
-                    return {
-                        "project": project_path,
-                        "status": "error",
-                        "error": f"Infer 분석 실패 (종료 코드: {result})"
-                    }
-                
-                # 결과 파일 확인
-                infer_out_dir = "infer-out"
-                if not os.path.exists(infer_out_dir):
-                    return {
-                        "project": project_path,
-                        "status": "error",
-                        "error": "infer-out 디렉토리가 생성되지 않았습니다."
-                    }
-                
-                report_file = os.path.join(infer_out_dir, "report.txt")
-                if not os.path.exists(report_file):
-                    return {
-                        "project": project_path,
-                        "status": "error",
-                        "error": "report.txt 파일이 생성되지 않았습니다."
-                    }
-                
-                # 결과 분석
-                analyzer = InferAnalyzer(abs_project_path)
-                issues = analyzer.analyze_results()
-                
-                # 각 이슈에 메서드 코드 추가
-                processed_issues = []
-                for issue in issues:
-                    try:
-                        processed_issue = {
-                            "bug_type": issue.get("bug_type", "알 수 없음"),
-                            "file": issue.get("file", "알 수 없음"),
-                            "line": issue.get("line", 0),
-                            "procedure": issue.get("procedure", "알 수 없음"),
-                            "description": issue.get("description", "설명 없음")
-                        }
-                        
-                        # 메서드 코드 추출
-                        if all(k in processed_issue for k in ["file", "procedure", "line"]):
-                            processed_issue["method_code"] = self.get_method_code(
-                                processed_issue["file"],
-                                processed_issue["procedure"],
-                                processed_issue["line"]
-                            )
-                        
-                        processed_issues.append(processed_issue)
-                    except Exception as e:
-                        print(f"경고: 이슈 처리 중 오류 발생: {e}")
-                        continue
-                
-                return {
-                    "project": project_path,
-                    "status": "success",
-                    "issues": processed_issues,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-                
-            finally:
-                # 원래 디렉토리로 복귀
-                os.chdir(original_dir)
+            return {
+                "project": project_path,
+                "status": "success",
+                "error": None
+            }
             
         except Exception as e:
             return {
                 "project": project_path,
                 "status": "error",
-                "error": f"예외 발생: {str(e)}",
-                "issues": []
+                "error": str(e)
             }
+
+    def detect_java_version(self, project_path: str) -> Optional[str]:
+        """프로젝트의 Java 버전 요구사항을 확인합니다."""
+        try:
+            # build.gradle 파일 확인
+            gradle_file = os.path.join(project_path, "build.gradle")
+            if os.path.exists(gradle_file):
+                with open(gradle_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # sourceCompatibility 또는 targetCompatibility 확인
+                    if 'sourceCompatibility' in content:
+                        match = re.search(r'sourceCompatibility\s*=\s*[\'"]?(\d+)[\'"]?', content)
+                        if match:
+                            return match.group(1)
+                    if 'targetCompatibility' in content:
+                        match = re.search(r'targetCompatibility\s*=\s*[\'"]?(\d+)[\'"]?', content)
+                        if match:
+                            return match.group(1)
+
+            # pom.xml 파일 확인
+            pom_file = os.path.join(project_path, "pom.xml")
+            if os.path.exists(pom_file):
+                with open(pom_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # maven.compiler.source 또는 maven.compiler.target 확인
+                    if 'maven.compiler.source' in content:
+                        match = re.search(r'<maven\.compiler\.source>(\d+)</maven\.compiler\.source>', content)
+                        if match:
+                            return match.group(1)
+                    if 'maven.compiler.target' in content:
+                        match = re.search(r'<maven\.compiler\.target>(\d+)</maven\.compiler\.target>', content)
+                        if match:
+                            return match.group(1)
+
+            # 기본값으로 Java 21 반환
+            return "21"
+        except Exception as e:
+            print(f"Java 버전 확인 중 오류 발생: {str(e)}")
+            return "21"  # 오류 발생 시 기본값으로 Java 21 반환
 
     def save_summary(self, results: List[Dict]) -> str:
         """분석 결과를 요약하여 저장합니다."""
@@ -300,52 +301,62 @@ class BatchInferAnalyzer:
                 print(f"오류: {result.get('error', '알 수 없음')}")
             print("=" * 80)
     
-    def run(self, directory: str) -> None:
-        """지정된 디렉토리의 모든 Java 프로젝트를 분석합니다."""
+    def run_analysis(self, directory: str) -> None:
+        """프로젝트 분석 실행"""
         try:
             # Java 프로젝트 찾기
-            print(f"Java 프로젝트 검색 중: {directory}")
-            projects = self.find_java_projects(directory)
-            
-            if not projects:
-                print(f"{self.YELLOW}분석할 Java 프로젝트를 찾을 수 없습니다.{self.NC}")
+            java_projects = self.find_java_projects(directory)
+            if not java_projects:
+                print("분석할 Java 프로젝트를 찾을 수 없습니다.")
                 return
+
+            # Java 버전별로 프로젝트 그룹화
+            projects_by_java_version = {}
+            for project in java_projects:
+                java_version = self.detect_java_version(project)
+                if java_version not in projects_by_java_version:
+                    projects_by_java_version[java_version] = []
+                projects_by_java_version[java_version].append(project)
+
+            # 각 Java 버전별로 분석 실행
+            all_results = []
+            for java_version, projects in projects_by_java_version.items():
+                print(f"\nJava {java_version} 프로젝트 분석 시작 (총 {len(projects)}개)")
                 
-            print(f"\n배치 Infer 분석을 시작합니다...")
-            print(f"분석할 프로젝트 수: {len(projects)}")
-            print(f"동시 실행 수: {self.max_workers}")
-            
-            # ThreadPoolExecutor로 병렬 처리
-            results = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                future_to_project = {executor.submit(self.analyze_project, project): project for project in projects}
+                # Java 버전 설정
+                java_home = f"/usr/lib/jvm/java-{java_version}-openjdk-amd64"
+                if not os.path.exists(java_home):
+                    print(f"Java {java_version}이 설치되어 있지 않습니다. {java_home} 경로를 확인해주세요.")
+                    continue
                 
-                for future in concurrent.futures.as_completed(future_to_project):
-                    project = future_to_project[future]
-                    try:
-                        result = future.result()
-                        results.append(result)
-                    except Exception as e:
-                        print(f"{self.RED}프로젝트 분석 중 오류 발생: {project} - {e}{self.NC}")
-                        results.append({
-                            "project": project,
-                            "status": "error",
-                            "error": str(e),
-                            "issues": []
-                        })
-            
+                # 환경 변수 설정
+                os.environ["JAVA_HOME"] = java_home
+                os.environ["PATH"] = f"{java_home}/bin:" + os.environ["PATH"]
+                print(f"JAVA_HOME 설정: {java_home}")
+
+                # 해당 Java 버전의 프로젝트들을 병렬로 분석
+                with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    future_to_project = {executor.submit(self.analyze_project, project): project for project in projects}
+                    for future in concurrent.futures.as_completed(future_to_project):
+                        project = future_to_project[future]
+                        try:
+                            result = future.result()
+                            all_results.append(result)
+                            print(f"프로젝트 분석 완료: {project}")
+                        except Exception as e:
+                            print(f"프로젝트 분석 중 오류 발생: {project} - {str(e)}")
+                            all_results.append({
+                                "project": project,
+                                "status": "error",
+                                "error": str(e)
+                            })
+
             # 결과 저장
-            summary_file = self.save_summary(results)
-            if summary_file:
-                # 결과 출력
-                self.print_summary(results)
-            else:
-                print(f"{self.RED}결과를 저장할 수 없어 분석 결과만 출력합니다.{self.NC}")
-                self.print_summary(results)
-                
+            summary_file = self.save_summary(all_results)
+            print(f"\n분석 결과가 저장되었습니다: {summary_file}")
+
         except Exception as e:
-            print(f"{self.RED}배치 분석 중 오류가 발생했습니다: {e}{self.NC}")
-            raise
+            print(f"분석 실행 중 오류 발생: {str(e)}")
 
 def main():
     if len(sys.argv) != 2:
@@ -357,7 +368,7 @@ def main():
     
     # 배치 분석기 실행
     analyzer = BatchInferAnalyzer(max_workers=2)  # 동시 실행 수 조정 가능
-    analyzer.run(directory)
+    analyzer.run_analysis(directory)
 
 if __name__ == "__main__":
     main() 
