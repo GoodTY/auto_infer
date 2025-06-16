@@ -130,7 +130,7 @@ class BatchInferAnalyzer:
             # Gradle 프로젝트 분석
             if os.path.exists(os.path.join(project_path, "gradlew")):
                 print("Gradle 프로젝트 분석 시작...")
-                gradle_cmd = ["infer", "run", "--", "./gradlew", "clean", "build", "--no-daemon"]
+                gradle_cmd = ["infer", "run", "--", "./gradlew", "clean", "build", "--no-daemon", "-DskipTests"]
                 process = subprocess.run(
                     gradle_cmd,
                     cwd=project_path,
@@ -150,28 +150,39 @@ class BatchInferAnalyzer:
                 print("Gradle 프로젝트 분석 완료")
             
             # Maven 프로젝트 분석
-            elif os.path.exists(os.path.join(project_path, "pom.xml")):
-                print("Maven 프로젝트 분석 시작...")
-                
-                # Maven 빌드 명령 실행
-                mvn_cmd = ["infer", "run", "--", "mvn", "clean", "compile"]
-                process = subprocess.run(
-                    mvn_cmd,
-                    cwd=project_path,
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-                
-                if process.returncode != 0:
+            if os.path.exists(os.path.join(project_path, "pom.xml")):
+                print(f"Running Maven analysis for {project_path}...")
+                try:
+                    # Run Maven build with Infer
+                    maven_cmd = ["infer", "run", "--", "mvnw", "clean", "compile", "-DskipTests"]
+                    result = subprocess.run(maven_cmd, 
+                                         env=env,
+                                         cwd=project_path,
+                                         capture_output=True,
+                                         text=True)
+                    
+                    if result.returncode != 0:
+                        print(f"Error during Maven analysis: {result.stderr}")
+                        return {
+                            "project": project_path,
+                            "status": "error",
+                            "error": f"Maven 빌드/분석 실패. 로그: {result.stderr}"
+                        }
+                        
+                    print(f"Maven analysis completed for {project_path}")
+                    return {
+                        "project": project_path,
+                        "status": "success",
+                        "error": None
+                    }
+                    
+                except Exception as e:
+                    print(f"Error during Maven analysis: {str(e)}")
                     return {
                         "project": project_path,
                         "status": "error",
-                        "error": f"Maven 빌드/분석 실패. 로그: {process.stderr}"
+                        "error": str(e)
                     }
-                
-                print("Maven 프로젝트 분석 완료")
             else:
                 return {
                     "project": project_path,
