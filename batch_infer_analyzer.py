@@ -154,7 +154,7 @@ class BatchInferAnalyzer:
                 print(f"Running Maven analysis for {project_path}...")
                 try:
                     # Run Maven build with Infer
-                    maven_cmd = ["infer", "run", "--", "mvnw", "clean", "compile", "-DskipTests"]
+                    maven_cmd = ["infer", "run", "--", "mvn", "clean", "compile", "-DskipTests"]
                     result = subprocess.run(maven_cmd, 
                                          env=env,
                                          cwd=project_path,
